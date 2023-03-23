@@ -10,6 +10,12 @@ namespace App\Http\Controllers\Manage;
 
 
 use App\Http\Controllers\Controller;
+use App\Logic\Clinical\CaseLogic;
+use App\Logic\Clinical\QALogic;
+use App\Logic\Utils\Chat;
+use App\Model\Clinical\CaseDiseaseSceneModel;
+use App\Model\Clinical\CaseInquiryQuestionsModel;
+use App\Model\Live\WoodModel;
 use App\Model\Ucenter\UserMobiletelephoneModel;
 use App\Model\Ucenter\UserPersonalModel;
 use Illuminate\Http\Request;
@@ -20,7 +26,88 @@ use Phpml\CrossValidation\RandomSplit;
 class UserController extends Controller
 {
 
-    private $_OPENAI_API_KEY='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';
+    private  $questions = [
+        '患者哪里不舒服？',
+        '患者什么时候开始不舒服',
+        '患者的症状持续多久了？',
+        '患者有没有吃过什么药？',
+        '既往有没有什么异常的病情？',
+        '患者有没有工作？'
+    ];
+    public function caselist(Request $request){
+        $seesionid = $request->post('sid',"");
+        //随机20个案例
+        $case_list = CaseLogic::instance()->case_list();
+        if($seesionid == ""){
+            $seesionid = md5(time().srand(1000));
+        }
+        return ['code'=>200,
+            'sid'=>$seesionid,
+            'data'=>$case_list
+        ];
+    }
+
+    public function chatwen(Request $request){
+        $caseId = $request->post('caseId',"");
+        $seesionid = $request->post('sid',"");
+        $content = $request->post('content','');
+        if(!$seesionid){
+            $seesionid = md5(time().rand(1000));
+        }
+        $pr = CaseLogic::instance()->systempr($caseId,true);
+        $chat = new Chat();
+        //定义系统场景
+        $chat->Messages($pr,'system');//填充系统信息
+        //定义连续问的时候需要从库中取问题
+        $chat = QALogic::instance()->getqa($chat,$seesionid,$caseId);//填充历史问答
+        //判断是否问过这个问题
+        $result = QALogic::instance()->checkrepeat($seesionid,$caseId,$content);
+        if($result){
+            return [
+                'code'=>200,
+                'data'=>[
+                    'content'=>'你问过这个问题了!换个问题吧'
+                ]
+            ];
+        }
+        $chat->Messages($content);//填充当前问题
+
+        $chatMessages = $chat->liaotian();
+        $chatMessages['choices'][0]['message']['content'];
+        $insert = [
+            'case_id'=>$caseId,
+            'c_sid'=>$seesionid,
+            'c_system'=>$pr,
+            'c_name' =>"",
+            'c_question'=>$content,
+            'c_answer'=>$chatMessages['choices'][0]['message']['content'],
+            'c_log_id'=>$chatMessages['id']
+        ];
+        //记录每次问答
+        QALogic::instance()->userQA($insert);
+        return [
+            'code'=>200,
+            'sid'=>$seesionid,
+            'data'=>[
+                'content'=>$chatMessages['choices'][0]['message']['content'],
+            ]
+        ];
+    }
+
+
+    public function newQA($case_id){
+
+        //定义系统场景-- 案例数据取 病情介绍 既往史 门诊资料
+        $pr = CaseLogic::instance()->case_info($case_id);
+        //问诊数据 查体数据 取第一幕
+
+        $chat = new Chat();
+    }
+
+    public function continueQA($sid,$case_id){
+
+    }
+
     public function test(Request $request){
         $pagesize = 20;
         $page = $request->post('page',1);
@@ -71,7 +158,7 @@ class UserController extends Controller
     public function buquan(){
         $headers = array();
         $headers[] = "Content-Type: application/json";
-        $headers[] = "Authorization: Bearer ".$this->_OPENAI_API_KEY;
+        $headers[] = "Authorization: Bearer ".env("CHAT_KEY","");
 
 
         $data = array(
@@ -100,10 +187,30 @@ class UserController extends Controller
 
         curl_close($curl);
     }
+    public function chat(){
+        $chat = new Chat();
+        $p = ['德国榉木'];
+        $obj = WoodModel::m();
+        foreach ($p as $t){
+            $a=[
+                "w_distinguish" => "的鉴别",
+                "w_popularize" => "的推广文案",
+                "w_introduce" => "的介绍"
+            ];
+            foreach ($a as $k=>$b){
+                $response = $chat->Message($t.$b)->liaotian();
+                $up = [
+                    $k=>$response['choices'][0]['message']['content'],
+                ];
+                $result  = $obj->where(['w_name'=>$t])->update($up);
+            }
+            $result  = $obj->where(['w_name'=>$t])->update(['w_state'=>1]);
+        }
+    }
     public function liaotian(){
         $headers = array();
         $headers[] = "Content-Type: application/json";
-        $headers[] = "Authorization: Bearer ".$this->_OPENAI_API_KEY;
+        $headers[] = "Authorization: Bearer ".env("CHAT_KEY","");
         $data = array(
             "model" => "gpt-3.5-turbo",
             "max_tokens"=>2048,
@@ -161,7 +268,7 @@ class UserController extends Controller
 
         $headers = array(
             'Content-Type: application/json',
-            'Authorization: Bearer ' . $this->_OPENAI_API_KEY // 请替换 $OPENAI_API_KEY 为您的 API 密钥
+            'Authorization: Bearer ' . env("CHAT_KEY","") // 请替换 $OPENAI_API_KEY 为您的 API 密钥
         );
 
         $options = array(
