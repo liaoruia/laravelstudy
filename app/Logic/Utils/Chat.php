@@ -16,13 +16,14 @@ class Chat
 
     private $_OPENAI_API_KEY;
 //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
-    private $_url="https://api.openai.com/v1/chat/completions";
+    private $_url;
     private $_data=[];
     /**
      * Chat constructor.
      */
     public function __construct(){
         $this->_OPENAI_API_KEY = env('CHAT_KEY','');
+        $this->_url = env('CHAT_URL','');
         $this->_data = [
             "model" => "gpt-3.5-turbo",
             "temperature"=>0,
