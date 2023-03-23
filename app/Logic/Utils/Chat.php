@@ -15,7 +15,7 @@ class Chat
 {
 
     private $_OPENAI_API_KEY;
-//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
+
     private $_url;
     private $_data=[];
     /**
